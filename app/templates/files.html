@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PikPak Files</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="container">
+    <section class="card info-card">
+        <div class="info-grid single">
+            <div>
+                <div class="info-header">
+                    <p class="muted small">空间使用</p>
+                    <button id="theme-toggle" class="ghost">切换主题</button>
+                </div>
+                <div class="progress">
+                    <div id="quota-bar" class="progress-bar" style="width:0%"></div>
+                </div>
+                <p class="muted" id="quota-text">-</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <div>
+                <h1>文件列表</h1>
+                <p id="status" class="muted">加载中...</p>
+                <p id="breadcrumb" class="muted small">路径: /</p>
+            </div>
+            <div class="actions">
+                <input id="path-input" type="text" placeholder="/path/to/folder" class="path-input">
+                <label class="inline small"><input type="checkbox" id="create-missing"> 不存在则创建</label>
+                <button id="jump">跳转</button>
+                <button id="back">返回上一级</button>
+                <button id="refresh">刷新</button>
+            </div>
+        </header>
+        <div id="file-list" class="list"></div>
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <div>
+                <h2>批量转存分享链接</h2>
+                <p class="muted small">每行一个分享链接，可选填写分享密码</p>
+            </div>
+            <div class="actions">
+                <button id="save-share">转存</button>
+            </div>
+        </header>
+        <div class="share-inputs">
+            <textarea id="share-links" placeholder="https://mypikpak.com/s/...\nhttps://mypikpak.com/s/..." rows="4"></textarea>
+            <label class="inline">密码（可选）<input type="text" id="share-pass" placeholder="如有密码则填写"></label>
+        </div>
+        <div id="share-results"></div>
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <div>
+                <h2>离线任务</h2>
+                <p class="muted small">创建 / 重试 / 删除，自动刷新</p>
+            </div>
+            <div class="actions">
+                <button id="refresh-tasks">刷新任务</button>
+            </div>
+        </header>
+        <div class="share-inputs">
+            <label>下载链接（磁力/直链）
+                <input type="text" id="task-url" placeholder="magnet:? / http(s)://">
+            </label>
+            <label>保存目录ID（可选，默认 My Pack）
+                <input type="text" id="task-parent" placeholder="可留空">
+            </label>
+            <label>名称（可选）
+                <input type="text" id="task-name" placeholder="可留空，默认文件名">
+            </label>
+            <div class="inline">
+                <button id="create-task" type="button">创建离线任务</button>
+            </div>
+        </div>
+        <div id="task-status" class="muted small"></div>
+        <div id="tasks-list" class="list"></div>
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <div>
+                <h2>文件移动 / 复制</h2>
+                <p class="muted small">按路径操作；可自动创建目标路径</p>
+            </div>
+        </header>
+        <form id="move-copy-form" class="share-inputs">
+            <label>来源路径（每行一个）
+                <textarea id="from-paths" rows="3" placeholder="/A/file1\n/A/folder/file2"></textarea>
+            </label>
+            <label>目标路径
+                <input type="text" id="to-path" placeholder="/B/target-folder">
+            </label>
+            <div class="inline">
+                <label class="inline small"><input type="checkbox" id="do-move"> 移动（不选则复制）</label>
+                <label class="inline small"><input type="checkbox" id="move-create"> 不存在则创建</label>
+            </div>
+            <button type="submit">执行</button>
+            <pre id="move-copy-result" class="muted small"></pre>
+        </form>
+    </section>
+</main>
+
+<script>
+    const fileListEl = document.getElementById('file-list');
+    const statusEl = document.getElementById('status');
+    const refreshBtn = document.getElementById('refresh');
+    const backBtn = document.getElementById('back');
+    const breadcrumbEl = document.getElementById('breadcrumb');
+    const shareBtn = document.getElementById('save-share');
+    const shareInput = document.getElementById('share-links');
+    const sharePassInput = document.getElementById('share-pass');
+    const shareResultsEl = document.getElementById('share-results');
+    const pathInput = document.getElementById('path-input');
+    const jumpBtn = document.getElementById('jump');
+    const createMissingInput = document.getElementById('create-missing');
+    const quotaTextEl = document.getElementById('quota-text');
+    const quotaBarEl = document.getElementById('quota-bar');
+    const themeToggle = document.getElementById('theme-toggle');
+    const taskUrlInput = document.getElementById('task-url');
+    const taskParentInput = document.getElementById('task-parent');
+    const taskNameInput = document.getElementById('task-name');
+    const createTaskBtn = document.getElementById('create-task');
+    const refreshTasksBtn = document.getElementById('refresh-tasks');
+    const tasksListEl = document.getElementById('tasks-list');
+    const taskStatusEl = document.getElementById('task-status');
+    const moveCopyForm = document.getElementById('move-copy-form');
+    const moveResultEl = document.getElementById('move-copy-result');
+    const fromPathsInput = document.getElementById('from-paths');
+    const toPathInput = document.getElementById('to-path');
+    const doMoveInput = document.getElementById('do-move');
+    const moveCreateInput = document.getElementById('move-create');
+
+    let currentParentId = null;
+    let pathStack = [];
+    let pathSegments = [];
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        currentTheme = theme;
+        localStorage.setItem('theme', theme);
+        themeToggle.textContent = theme === 'light' ? '切换到夜间' : '切换到日间';
+    }
+
+    themeToggle.addEventListener('click', () => {
+        applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    });
+
+    async function fetchFiles(parentId = null, path = null) {
+        statusEl.textContent = '加载中...';
+        fileListEl.innerHTML = '';
+        try {
+            let query = '';
+            if (path) {
+                query = `?path=${encodeURIComponent(path)}&create_missing=${createMissingInput.checked}`;
+            } else if (parentId) {
+                query = `?parent_id=${encodeURIComponent(parentId)}`;
+            }
+            const res = await fetch(`/api/files${query}`);
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            if (!res.ok) throw new Error('加载失败');
+            const data = await res.json();
+            renderFiles(data.files || []);
+            statusEl.textContent = `共 ${data.files.length} 个文件`;
+            if (data.path_trail && data.path_trail.length) {
+                pathSegments = data.path_trail.map(p => p.name);
+                pathStack = [];
+                let prevId = null;
+                data.path_trail.forEach(node => {
+                    pathStack.push({ id: prevId, name: node.name });
+                    prevId = node.id;
+                });
+                currentParentId = prevId;
+            }
+            updateBreadcrumb();
+        } catch (err) {
+            statusEl.textContent = err.message;
+        }
+    }
+
+    function updateBreadcrumb() {
+        const text = pathSegments.length ? '/' + pathSegments.join('/') : '/';
+        breadcrumbEl.textContent = `路径: ${text}`;
+        pathInput.value = text;
+    }
+
+    function renderFiles(files) {
+        if (!files.length) {
+            fileListEl.innerHTML = '<p class="muted">暂无文件</p>';
+            return;
+        }
+        const ul = document.createElement('ul');
+        ul.className = 'items';
+        files.forEach(f => {
+            const li = document.createElement('li');
+            const isFolder = (f.kind || '').toLowerCase().includes('folder');
+            li.innerHTML = `
+                <div class="row">
+                    <span class="name ${isFolder ? 'folder' : ''}" data-id="${f.id}" data-name="${f.name}" data-folder="${isFolder}">${f.name}</span>
+                    <span class="kind">${isFolder ? 'folder' : f.kind}</span>
+                </div>
+            `;
+            ul.appendChild(li);
+        });
+        fileListEl.appendChild(ul);
+
+        fileListEl.querySelectorAll('.name.folder').forEach(el => {
+            el.addEventListener('click', () => {
+                const id = el.dataset.id;
+                const name = el.dataset.name;
+                pathStack.push({ id: currentParentId, name });
+                currentParentId = id;
+                pathSegments.push(name);
+                updateBreadcrumb();
+                fetchFiles(currentParentId);
+            });
+        });
+    }
+
+    refreshBtn.addEventListener('click', () => fetchFiles(currentParentId));
+    backBtn.addEventListener('click', () => {
+        if (pathStack.length === 0) {
+            currentParentId = null;
+            pathSegments = [];
+            fetchFiles(null);
+            return;
+        }
+        const prev = pathStack.pop();
+        currentParentId = prev.id;
+        pathSegments.pop();
+        fetchFiles(currentParentId);
+    });
+
+    jumpBtn.addEventListener('click', () => {
+        const p = pathInput.value.trim() || '/';
+        const normalized = p.startsWith('/') ? p : '/' + p;
+        pathSegments = normalized.split('/').filter(Boolean);
+        currentParentId = null;
+        pathStack = [];
+        fetchFiles(null, normalized);
+    });
+
+    shareBtn.addEventListener('click', async () => {
+        shareResultsEl.textContent = '';
+        const links = shareInput.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+        if (!links.length) {
+            shareResultsEl.textContent = '请填写分享链接';
+            return;
+        }
+        shareResultsEl.textContent = '转存中...';
+        try {
+            const res = await fetch('/api/files/share-save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ share_links: links, pass_code: sharePassInput.value || null }),
+            });
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            if (!res.ok) throw new Error('转存失败');
+            const data = await res.json();
+            renderShareSaveResults(data.results || []);
+        } catch (err) {
+            shareResultsEl.textContent = err.message;
+        }
+    });
+
+    function renderShareSaveResults(results) {
+        if (!results.length) {
+            shareResultsEl.textContent = '无结果';
+            return;
+        }
+        const list = document.createElement('ul');
+        list.className = 'items';
+        results.forEach(r => {
+            const li = document.createElement('li');
+            if (r.error) {
+                li.innerHTML = `<div class="muted small">${r.share_link}</div><span class="error">${r.error}</span>`;
+            } else {
+                const ids = (r.saved_ids || []).join(', ');
+                li.innerHTML = `<div class="muted small">${r.share_link}</div><div>已转存文件ID: ${ids || '未返回'}</div>`;
+            }
+            list.appendChild(li);
+        });
+        shareResultsEl.innerHTML = '';
+        shareResultsEl.appendChild(list);
+    }
+
+    async function fetchTasks() {
+        taskStatusEl.textContent = '加载中...';
+        tasksListEl.innerHTML = '';
+        try {
+            const res = await fetch('/api/tasks/offline');
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            if (!res.ok) throw new Error('获取失败');
+            const data = await res.json();
+            renderTasks(data.tasks || []);
+            taskStatusEl.textContent = `共 ${data.tasks.length} 个任务`;
+        } catch (err) {
+            taskStatusEl.textContent = err.message;
+        }
+    }
+
+    function renderTasks(tasks) {
+        if (!tasks.length) {
+            tasksListEl.innerHTML = '<p class="muted">暂无任务</p>';
+            return;
+        }
+        const ul = document.createElement('ul');
+        ul.className = 'items';
+        tasks.forEach(t => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <div class="row">
+                    <div class="task-main">
+                        <div class="name">${t.name || t.id}</div>
+                        <div class="muted small">${t.status || ''}</div>
+                    </div>
+                    <div class="actions inline-actions">
+                        <button data-id="${t.id}" class="retry ghost">重试</button>
+                        <button data-id="${t.id}" class="delete ghost">删除</button>
+                    </div>
+                </div>
+            `;
+            ul.appendChild(li);
+        });
+        tasksListEl.innerHTML = '';
+        tasksListEl.appendChild(ul);
+
+        tasksListEl.querySelectorAll('button.retry').forEach(btn => {
+            btn.addEventListener('click', () => handleRetry(btn.dataset.id));
+        });
+        tasksListEl.querySelectorAll('button.delete').forEach(btn => {
+            btn.addEventListener('click', () => handleDelete(btn.dataset.id));
+        });
+    }
+
+    async function handleRetry(taskId) {
+        taskStatusEl.textContent = '重试中...';
+        try {
+            const res = await fetch('/api/tasks/offline/retry', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task_id: taskId }),
+            });
+            if (!res.ok) throw new Error('重试失败');
+            taskStatusEl.textContent = '已重试';
+            fetchTasks();
+        } catch (err) {
+            taskStatusEl.textContent = err.message;
+        }
+    }
+
+    async function handleDelete(taskId) {
+        taskStatusEl.textContent = '删除中...';
+        try {
+            const res = await fetch('/api/tasks/offline', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task_ids: [taskId], delete_files: false }),
+            });
+            if (!res.ok) throw new Error('删除失败');
+            taskStatusEl.textContent = '已删除';
+            fetchTasks();
+        } catch (err) {
+            taskStatusEl.textContent = err.message;
+        }
+    }
+
+    createTaskBtn.addEventListener('click', async () => {
+        const url = taskUrlInput.value.trim();
+        if (!url) {
+            taskStatusEl.textContent = '请填写下载链接';
+            return;
+        }
+        taskStatusEl.textContent = '创建中...';
+        try {
+            const res = await fetch('/api/tasks/offline', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, parent_id: taskParentInput.value || null, name: taskNameInput.value || null }),
+            });
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            if (!res.ok) throw new Error('创建失败');
+            taskStatusEl.textContent = '已创建';
+            taskUrlInput.value = '';
+            taskNameInput.value = '';
+            fetchTasks();
+        } catch (err) {
+            taskStatusEl.textContent = err.message;
+        }
+    });
+
+    refreshTasksBtn.addEventListener('click', fetchTasks);
+
+    moveCopyForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fromPaths = fromPathsInput.value.split(/\n+/).map(s => s.trim()).filter(Boolean);
+        const toPath = toPathInput.value.trim();
+        const move = doMoveInput.checked;
+        const create = moveCreateInput.checked;
+        if (!fromPaths.length || !toPath) {
+            moveResultEl.textContent = '请填写来源路径和目标路径';
+            return;
+        }
+        moveResultEl.textContent = '处理中...';
+        try {
+            const res = await fetch('/api/files/move-copy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ from_paths: fromPaths, to_path: toPath, move, create }),
+            });
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            if (!res.ok) throw new Error('操作失败');
+            const data = await res.json();
+            moveResultEl.textContent = JSON.stringify(data.result, null, 2);
+            fetchFiles(currentParentId);
+        } catch (err) {
+            moveResultEl.textContent = err.message;
+        }
+    });
+
+    async function loadAccount() {
+        try {
+            const res = await fetch('/api/account/quota');
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            const usage = parseInt(data?.quota?.usage || '0', 10);
+            const limit = parseInt(data?.quota?.limit || '0', 10);
+            const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : 0;
+            quotaBarEl.style.width = `${percent}%`;
+            const format = (v) => {
+                const gb = v / 1024 / 1024 / 1024;
+                return `${gb.toFixed(2)} GB`;
+            };
+            quotaTextEl.textContent = limit ? `${format(usage)} / ${format(limit)} (${percent}%)` : '-';
+        } catch (_) {
+            quotaTextEl.textContent = '配额获取失败';
+        }
+    }
+
+    applyTheme(currentTheme);
+    loadAccount();
+    fetchFiles(currentParentId);
+    fetchTasks();
+</script>
+</body>
+</html>

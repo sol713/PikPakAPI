@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PikPak Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="container">
+    <section class="card">
+        <h1>PikPak 登录</h1>
+        <form id="login-form">
+            <label>账号
+                <input type="text" name="username" required>
+            </label>
+            <label>密码
+                <input type="password" name="password" required>
+            </label>
+            <button type="submit">登录</button>
+            <p id="error" class="error"></p>
+        </form>
+    </section>
+</main>
+<script>
+    const form = document.getElementById('login-form');
+    const errorEl = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorEl.textContent = '';
+        const formData = new FormData(form);
+        const payload = Object.fromEntries(formData.entries());
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                errorEl.textContent = data.detail || '登录失败';
+                return;
+            }
+            window.location.href = '/files';
+        } catch (err) {
+            errorEl.textContent = '网络错误';
+        }
+    });
+</script>
+</body>
+</html>

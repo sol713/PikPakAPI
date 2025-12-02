@@ -12,6 +12,9 @@ keywords = ["pikpak", "api"]
 [tool.poetry.dependencies]
 python = "^3.8.3"
 httpx = ">=0.24.1"
+fastapi = "^0.111.0"
+uvicorn = {version = "^0.30.0", extras = ["standard"]}
+python-multipart = "^0.0.9"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
